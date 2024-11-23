@@ -3,12 +3,14 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
+#include <vector>
+#include <atomic>
+#include <algorithm>
 #include "pthread_barrier_mac.h"
 
 int number_files;
 int files_per_mapper;
 std::vector<std::string> files;
-const std::string PATH = "checker/";
 int mapper_threads, reducer_threads;
 
 /* Set with all the words used. */
@@ -33,6 +35,16 @@ std::atomic<int> mapper_index;
 /* Barrier used to know when each reduce thread to start construct the output files. */
 pthread_barrier_t barrier;
 
+std::string remove_non_letters(std::string word) {
+    std::string word_alpha;
+    for (char c : word) {
+        if (c >= 'a' && c <= 'z') {
+            word_alpha.push_back(c);
+        }
+    }
+    return word_alpha;
+}
+
 void* mapper(void *arg) {
     int id = *(int*)arg;
     int start = id * files_per_mapper;
@@ -52,16 +64,14 @@ void* mapper(void *arg) {
         while (fin >> word) {
             /* Transform the word into lowercase alphabet. */
             std::transform(word.begin(), word.end(), word.begin(), ::tolower);
-            if (word.back() == '.' || word.back() == ',') {
-                word.pop_back();
-            }
+            std::string word_alpha = remove_non_letters(word);
 
             pthread_mutex_lock(&mutex_mapper_output);
-            if (all_words.find(word) == all_words.end()) {
-                words_by_first_letter[word[0]].push_back(word);
+            if (all_words.find(word_alpha) == all_words.end()) {
+                words_by_first_letter[word_alpha[0]].push_back(word_alpha);
             }
-            all_words.insert(word);
-            mapper_output.insert(std::make_pair(word, i + 1));
+            all_words.insert(word_alpha);
+            mapper_output.insert(std::make_pair(word_alpha, i + 1));
             pthread_mutex_unlock(&mutex_mapper_output);
         }
 
@@ -120,7 +130,7 @@ void* reducer(void *arg) {
             return a.second.size() > b.second.size();
         });
 
-        std::ofstream fout(PATH + file_name);
+        std::ofstream fout(file_name);
         for (auto word : output_in_file) {
             fout << word.first << ":[";
             bool first = true;
@@ -154,7 +164,7 @@ void read_input_file(std::string file_input) {
     for (int i = 0; i < number_files; i++) {
         std::string file_name;
         fin >> file_name;
-        files.push_back(PATH + file_name);
+        files.push_back(file_name);
     }
 
     fin.close();
@@ -169,7 +179,7 @@ int main(int argc, char **argv) {
     /* Extract parameters. */
     mapper_threads = std::stoi(argv[1]);
     reducer_threads = std::stoi(argv[2]);
-    std::string file_input = PATH + argv[3];
+    std::string file_input = argv[3];
 
     /* Read the input file. */
     read_input_file(file_input);

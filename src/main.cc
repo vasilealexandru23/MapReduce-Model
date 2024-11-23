@@ -61,6 +61,9 @@ void* mapper(void *arg) {
         }
         pthread_mutex_unlock(&mutex_mapper_parse_file);
 
+        std::string word;
+        std::unordered_set<std::string> words_in_file;
+        std::set<std::pair<std::string, int> > mapper_output_curr_file;
         std::ifstream fin(files[id_file]);
 
         /* Check if file exists. */
@@ -69,23 +72,31 @@ void* mapper(void *arg) {
             exit(1);
         }
 
-        std::string word;
-
+        /* Process the current file. */
         while (fin >> word) {
             /* Transform the word into lowercase alphabet. */
             std::transform(word.begin(), word.end(), word.begin(), ::tolower);
             std::string word_alpha = remove_non_letters(word);
 
-            pthread_mutex_lock(&mutex_mapper_output);
-            if (all_words.find(word_alpha) == all_words.end()) {
-                words_by_first_letter[word_alpha[0]].push_back(word_alpha);
-            }
-            all_words.insert(word_alpha);
-            mapper_output.insert(std::make_pair(word_alpha, id_file + 1));
-            pthread_mutex_unlock(&mutex_mapper_output);
+            words_in_file.insert(word_alpha);
+            mapper_output_curr_file.insert(std::make_pair(word_alpha, id_file + 1));
         }
 
+        /* Close the current file. */
         fin.close();
+
+        /* Put data in the common buffer. */
+        pthread_mutex_lock(&mutex_mapper_output);
+        for (auto word : words_in_file) {
+            if (all_words.find(word) == all_words.end()) {
+                words_by_first_letter[word[0]].push_back(word);
+            }
+            all_words.insert(word);
+        }
+        for (auto word : mapper_output_curr_file) {
+            mapper_output.insert(word);
+        }
+        pthread_mutex_unlock(&mutex_mapper_output);
     }
     
     pthread_barrier_wait(&finish_mapper_barrier);

@@ -1,4 +1,8 @@
+# compiler setup
+CC=g++ -std=c++11
+CFLAGS=-Wall -Werror
+
 build:
-		gcc main.c -o tema1 -lpthread
+		$(CC) $(CFLAGS) main.cc -o tema1 -lpthread
 clean:
 		rm tema1

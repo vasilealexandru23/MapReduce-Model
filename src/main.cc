@@ -119,17 +119,12 @@ void* reducer(void *arg)
     auto itr = mapper_output.begin();
     std::advance(itr, start);
 
-    std::vector<std::pair<std::string, int> > mapper_output_curr_thread;
+    pthread_mutex_lock(&mutex_reducer_output);
     for (; itr != mapper_output.end() && start < end; itr++, start++) {
         std::string word = itr->first;
         int file_index = itr->second;
 
-        mapper_output_curr_thread.push_back(std::make_pair(word, file_index));
-    }
-
-    pthread_mutex_lock(&mutex_reducer_output);
-    for (auto word : mapper_output_curr_thread) {
-        reducer_output[word.first].push_back(word.second);
+        reducer_output[word].push_back(file_index);
     }
     pthread_mutex_unlock(&mutex_reducer_output);
 

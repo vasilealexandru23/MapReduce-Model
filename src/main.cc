@@ -37,7 +37,8 @@ pthread_barrier_t barrier;
 
 pthread_barrier_t finish_mapper_barrier;
 
-std::string remove_non_letters(std::string &word) {
+std::string remove_non_letters(std::string &word)
+{
     std::string word_alpha;
     for (char c : word) {
         if (c >= 'a' && c <= 'z') {
@@ -47,7 +48,8 @@ std::string remove_non_letters(std::string &word) {
     return word_alpha;
 }
 
-void* mapper(void *arg) {
+void* mapper(void *arg)
+{
     int id_file;
 
     while (true) {
@@ -104,7 +106,8 @@ void* mapper(void *arg) {
     pthread_exit(NULL);
 }
 
-void* reducer(void *arg) {
+void* reducer(void *arg)
+{
     pthread_barrier_wait(&finish_mapper_barrier);
 
     int id = *(int*)arg;
@@ -149,14 +152,17 @@ void* reducer(void *arg) {
         }
 
         /* Sort them in descending order by the size of the vector with indexes size. */
-        std::sort(output_in_file.begin(), output_in_file.end(), [](const std::pair<std::string, std::vector<int> > &a, const std::pair<std::string, std::vector<int> > &b) {
-            if (a.second.size() == b.second.size()) {
-                return a.first < b.first;
-            }
-            return a.second.size() > b.second.size();
-        });
+	    std::sort(output_in_file.begin(), output_in_file.end(),
+		    [](const std::pair<std::string, std::vector<int>> &a,
+               const std::pair<std::string, std::vector<int>> &b)
+            {
+			    if (a.second.size() == b.second.size()) {
+				    return a.first < b.first;
+			    }
+			    return a.second.size() > b.second.size();
+		    });
 
-        std::ofstream fout(file_name);
+	std::ofstream fout(file_name);
         for (auto word : output_in_file) {
             fout << word.first << ":[";
             bool first = true;
@@ -176,7 +182,8 @@ void* reducer(void *arg) {
     pthread_exit(NULL);
 }
 
-void read_input_file(std::string &file_input) {
+void read_input_file(std::string &file_input)
+{
     std::ifstream fin(file_input);
 
     /* Check if file exists. */
@@ -196,7 +203,8 @@ void read_input_file(std::string &file_input) {
     fin.close();
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     if (argc != 4) {
         std::cerr << "Usage: " << argv[0] << " <mapper_threads> <reducer_threads> <file_input>\n";
         return 1;

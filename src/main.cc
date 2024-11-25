@@ -124,11 +124,11 @@ void* reducer(void *arg) {
         mapper_output_curr_thread.push_back(std::make_pair(word, file_index));
     }
 
+    pthread_mutex_lock(&mutex_reducer_output);
     for (auto word : mapper_output_curr_thread) {
-        pthread_mutex_lock(&mutex_reducer_output);
         reducer_output[word.first].push_back(word.second);
-        pthread_mutex_unlock(&mutex_reducer_output);
     }
+    pthread_mutex_unlock(&mutex_reducer_output);
 
     pthread_barrier_wait(&barrier);
 
@@ -206,9 +206,6 @@ int main(int argc, char **argv) {
     mapper_threads = std::atoi(argv[1]);
     reducer_threads = std::atoi(argv[2]);
     std::string file_input = argv[3];
-
-    std::cout << "mapper_threads: " << mapper_threads << "\n";
-    std::cout << "reducer_threads: " << reducer_threads << "\n";
 
     /* Read the input file. */
     read_input_file(file_input);

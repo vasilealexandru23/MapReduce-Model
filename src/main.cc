@@ -8,34 +8,28 @@
 #include <algorithm>
 #include "pthread_barrier_mac.h"
 
-int number_files;
-std::vector<std::string> files;
-int mapper_threads, reducer_threads;
 
-/* Set with all the words used. */
-std::unordered_set<std::string> all_words;
+struct thread_args_t {
+    /* Global buffers for mapper threads. */
+    int mapper_index;
+    pthread_mutex_t mutex_mapper_output;
+    pthread_mutex_t mutex_mapper_parse_file;
+    std::unordered_set<std::string> all_words;
+    std::set<std::pair<std::string, int> > mapper_output;
+    std::unordered_map<char, std::vector<std::string> > words_by_first_letter;
+    int number_files;
+    int mapper_threads;
+    std::vector<std::string> files;
 
-/* The lists with all words and file's index from. */
-std::set<std::pair<std::string, int> > mapper_output;
-/* Mutex for the mapper output. */
-pthread_mutex_t mutex_mapper_output;
-pthread_mutex_t mutex_mapper_parse_file;
+    /* Buffers used by both threads. */
+    pthread_barrier_t finish_mapper_barrier;
 
-/* The list with the reducer operation output. */
-std::unordered_map<std::string, std::vector<int> > reducer_output;
-/* Mutex for the reducer output. */
-pthread_mutex_t mutex_reducer_output;
-
-/* Map with words mapped by alphabet letters. */
-std::unordered_map<char, std::vector<std::string> > words_by_first_letter;
-
-/* Atomic variable to know when each reduce thread to start working. */
-int mapper_index;
-
-/* Barrier used to know when each reduce thread to start construct the output files. */
-pthread_barrier_t barrier;
-
-pthread_barrier_t finish_mapper_barrier;
+    /* Global buffer for reducer threads. */
+    int reducer_threads;
+    std::unordered_map<std::string, std::vector<int> > reducer_output;
+    pthread_mutex_t mutex_reducer_output;
+    pthread_barrier_t barrier;
+};
 
 std::string remove_non_letters(std::string &word)
 {
@@ -52,25 +46,27 @@ void* mapper(void *arg)
 {
     int id_file;
 
+    struct thread_args_t *args = (struct thread_args_t*)arg;
+
     while (true) {
-        pthread_mutex_lock(&mutex_mapper_parse_file);
-        if (mapper_index == number_files) {
-            pthread_mutex_unlock(&mutex_mapper_parse_file);
+        pthread_mutex_lock(&args->mutex_mapper_parse_file);
+        if (args->mapper_index == args->number_files) {
+            pthread_mutex_unlock(&args->mutex_mapper_parse_file);
             break;
         } else {
-            id_file = mapper_index;
-            mapper_index++;
+            id_file = args->mapper_index;
+            args->mapper_index++;
         }
-        pthread_mutex_unlock(&mutex_mapper_parse_file);
+        pthread_mutex_unlock(&args->mutex_mapper_parse_file);
 
         std::string word;
         std::unordered_set<std::string> words_in_file;
         std::set<std::pair<std::string, int> > mapper_output_curr_file;
-        std::ifstream fin(files[id_file]);
+        std::ifstream fin(args->files[id_file]);
 
         /* Check if file exists. */
         if (!fin.good()) {
-            std::cerr << "File " << files[id_file] << " does not exist.\n";
+            std::cerr << "File " << args->files[id_file] << " does not exist.\n";
             exit(1);
         }
 
@@ -88,50 +84,53 @@ void* mapper(void *arg)
         fin.close();
 
         /* Put data in the common buffer. */
-        pthread_mutex_lock(&mutex_mapper_output);
+        pthread_mutex_lock(&args->mutex_mapper_output);
         for (auto word : words_in_file) {
-            if (all_words.find(word) == all_words.end()) {
-                words_by_first_letter[word[0]].push_back(word);
+            if (args->all_words.find(word) == args->all_words.end()) {
+                args->words_by_first_letter[word[0]].push_back(word);
             }
-            all_words.insert(word);
+            args->all_words.insert(word);
         }
         for (auto word : mapper_output_curr_file) {
-            mapper_output.insert(word);
+            args->mapper_output.insert(word);
         }
-        pthread_mutex_unlock(&mutex_mapper_output);
+        pthread_mutex_unlock(&args->mutex_mapper_output);
     }
     
-    pthread_barrier_wait(&finish_mapper_barrier);
+    pthread_barrier_wait(&args->finish_mapper_barrier);
 
     pthread_exit(NULL);
 }
 
 void* reducer(void *arg)
 {
-    pthread_barrier_wait(&finish_mapper_barrier);
+    std::pair<int, struct thread_args_t*> data = *(std::pair<int, struct thread_args_t*>*)arg;
+    struct thread_args_t *args = data.second;
 
-    int id = *(int*)arg;
-    int quantity = (mapper_output.size() + reducer_threads - 1) / reducer_threads;
+    pthread_barrier_wait(&args->finish_mapper_barrier);
+
+    int id = data.first;
+    int quantity = (args->mapper_output.size() + args->reducer_threads - 1) / args->reducer_threads;
 
     int start = id * quantity;
-    int end = std::min((id + 1) * quantity, (int)mapper_output.size());
+    int end = std::min((id + 1) * quantity, (int)args->mapper_output.size());
 
-    auto itr = mapper_output.begin();
+    auto itr = args->mapper_output.begin();
     std::advance(itr, start);
 
-    pthread_mutex_lock(&mutex_reducer_output);
-    for (; itr != mapper_output.end() && start < end; itr++, start++) {
+    pthread_mutex_lock(&args->mutex_reducer_output);
+    for (; itr != args->mapper_output.end() && start < end; itr++, start++) {
         std::string word = itr->first;
         int file_index = itr->second;
 
-        reducer_output[word].push_back(file_index);
+        args->reducer_output[word].push_back(file_index);
     }
-    pthread_mutex_unlock(&mutex_reducer_output);
+    pthread_mutex_unlock(&args->mutex_reducer_output);
 
-    pthread_barrier_wait(&barrier);
+    pthread_barrier_wait(&args->barrier);
 
     /* Can start to construct output files. */
-    int letters_handle = (26 + reducer_threads - 1) / reducer_threads;
+    int letters_handle = (26 + args->reducer_threads - 1) / args->reducer_threads;
     int start_letter = id * letters_handle;
     int end_letter = std::min((id + 1) * letters_handle, 26);
 
@@ -140,8 +139,8 @@ void* reducer(void *arg)
         std::string file_name = std::string(1, letter) + ".txt";
 
         std::vector<std::pair<std::string, std::vector<int> > > output_in_file;
-        for (auto word : words_by_first_letter[letter]) {
-            std::vector<int> reducer_output_curr_word = reducer_output[word];
+        for (auto word : args->words_by_first_letter[letter]) {
+            std::vector<int> reducer_output_curr_word = args->reducer_output[word];
             std::sort(reducer_output_curr_word.begin(), reducer_output_curr_word.end());
             output_in_file.push_back(std::make_pair(word, reducer_output_curr_word));
         }
@@ -177,7 +176,7 @@ void* reducer(void *arg)
     pthread_exit(NULL);
 }
 
-void read_input_file(std::string &file_input)
+void read_input_file(std::string &file_input, int &number_files, std::vector<std::string> &files)
 {
     std::ifstream fin(file_input);
 
@@ -206,31 +205,42 @@ int main(int argc, char **argv)
     }
 
     /* Extract parameters. */
-    mapper_threads = std::atoi(argv[1]);
-    reducer_threads = std::atoi(argv[2]);
+    int mapper_threads = std::atoi(argv[1]);
+    int reducer_threads = std::atoi(argv[2]);
     std::string file_input = argv[3];
+    int number_files;
+    std::vector<std::string> files;
 
     /* Read the input file. */
-    read_input_file(file_input);
+    read_input_file(file_input, number_files, files);
 
-    mapper_index = 0;
+    /* Initialize the thread arguments. */
+    struct thread_args_t thread_args;
 
-    pthread_mutex_init(&mutex_mapper_output, NULL);
-    pthread_mutex_init(&mutex_reducer_output, NULL);
-    pthread_mutex_init(&mutex_mapper_parse_file, NULL);
-    pthread_barrier_init(&barrier, NULL, reducer_threads);
-    pthread_barrier_init(&finish_mapper_barrier, NULL, mapper_threads + reducer_threads);
+    thread_args.number_files = number_files;
+    thread_args.mapper_threads = mapper_threads;
+    thread_args.reducer_threads = reducer_threads;
+    thread_args.files = files;
+
+
+    thread_args.mapper_index = 0;
+
+    pthread_mutex_init(&thread_args.mutex_mapper_output, NULL);
+    pthread_mutex_init(&thread_args.mutex_reducer_output, NULL);
+    pthread_mutex_init(&thread_args.mutex_mapper_parse_file, NULL);
+    pthread_barrier_init(&thread_args.barrier, NULL, reducer_threads);
+    pthread_barrier_init(&thread_args.finish_mapper_barrier, NULL, mapper_threads + reducer_threads);
 
     pthread_t threads[mapper_threads + reducer_threads];
-    int thread_ids[mapper_threads + reducer_threads];
+    std::pair<int, struct thread_args_t*> thread_data[mapper_threads + reducer_threads];
 
     for (int i = 0; i < mapper_threads + reducer_threads; i++) {
         if (i < mapper_threads) {
-            thread_ids[i] = i;
-            pthread_create(&threads[i], NULL, mapper, NULL);
+            thread_data[i] = {i, &thread_args};
+            pthread_create(&threads[i], NULL, mapper, &thread_args);
         } else {
-            thread_ids[i] = i - mapper_threads;
-            pthread_create(&threads[i], NULL, reducer, &thread_ids[i]);
+            thread_data[i] = {i - mapper_threads, &thread_args};
+            pthread_create(&threads[i], NULL, reducer, &(thread_data[i]));
         }
     }
 
@@ -239,11 +249,11 @@ int main(int argc, char **argv)
         pthread_join(threads[i], NULL);
     }
 
-    pthread_mutex_destroy(&mutex_mapper_output);
-    pthread_mutex_destroy(&mutex_reducer_output);
-    pthread_mutex_destroy(&mutex_mapper_parse_file);
-    pthread_barrier_destroy(&barrier);
-    pthread_barrier_destroy(&finish_mapper_barrier);
+    pthread_mutex_destroy(&thread_args.mutex_mapper_output);
+    pthread_mutex_destroy(&thread_args.mutex_reducer_output);
+    pthread_mutex_destroy(&thread_args.mutex_mapper_parse_file);
+    pthread_barrier_destroy(&thread_args.barrier);
+    pthread_barrier_destroy(&thread_args.finish_mapper_barrier);
 
     return 0;
 }

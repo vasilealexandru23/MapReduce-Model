@@ -8,7 +8,6 @@
 #include <algorithm>
 #include "pthread_barrier_mac.h"
 
-
 struct thread_args_t {
     /* Global buffers for mapper threads. */
     int mapper_index;
@@ -221,7 +220,6 @@ int main(int argc, char **argv)
     thread_args.mapper_threads = mapper_threads;
     thread_args.reducer_threads = reducer_threads;
     thread_args.files = files;
-
 
     thread_args.mapper_index = 0;
 

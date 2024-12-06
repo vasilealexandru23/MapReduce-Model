@@ -35,6 +35,10 @@ thread (26 / number of reducer threads), and each of them will go for the coresp
 and upload it's data in them (first we put all the data in a local vector, and sort it by the number of
 files that have the current word and then write it in the file).
 
+To not use global variables, I integreted all data in a custom struct and I pass it in each thread's function.
+I could optimize it, because some data is never used by mapper threads and some data is never used by reducer
+threads, but it works fine like that.
+
 ### Note: Read more about the model in this [paperwork](https://static.googleusercontent.com/media/research.google.com/en//archive/mapreduce-osdi04.pdf) done by Jeffrey Dean and Sanjay Ghemawat Google Engineers.
 
 ### Copyright 2024 Vasile Alexandru-Gabriel (vasilealexandru37@gmail.com)
